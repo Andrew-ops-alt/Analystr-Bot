@@ -15,7 +15,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-pro')
 
 # --- ИНСТРУКЦИЯ КАППЕРА ---
 SYSTEM_PROMPT = """
@@ -25,6 +25,7 @@ SYSTEM_PROMPT = """
 1. Анализ формы команд.
 2. Ставка (Риск / Надежная).
 3. Точный счет.
+4. Статистика последних 5 матчей.
 """
 
 # --- ФУНКЦИИ БОТА ---
