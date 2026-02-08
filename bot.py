@@ -1,82 +1,76 @@
 import logging
 import os
+import threading
+from flask import Flask # <-- Новая библиотека для "обманки"
 import google.generativeai as genai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
-# --- ПОЛУЧАЕМ КЛЮЧИ ИЗ НАСТРОЕК СЕРВЕРА ---
-# (На сервере мы их пропишем в специальном меню)
+# --- НАСТРОЙКИ ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+# --- НАСТРОЙКА GEMINI ---
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Настройка Gemini
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
-    # Используем проверенную модель
     model = genai.GenerativeModel('gemini-2.0-flash')
-else:
-    print("ОШИБКА: Ключ Google не найден!")
 
-# --- ИНСТРУКЦИЯ КАППЕРА (СИСТЕМНЫЙ ПРОМПТ) ---
+# --- ИНСТРУКЦИЯ КАППЕРА ---
 SYSTEM_PROMPT = """
-ТЫ — ПРОФЕССИОНАЛЬНЫЙ СПОРТИВНЫЙ АНАЛИТИК (BETTING EXPERT).
-Твоя цель: Дать максимально точный прогноз, чтобы пользователь выиграл ставку.
-
-ТВОЙ АЛГОРИТМ:
-1.  🌍 Определи вид спорта и важность матча (Лига Чемпионов, NBA, проходной матч).
-2.  📊 Вспомни стили команд (Атакующий, Автобус, Контратакующий).
-3.  ⚔️ Вспомни историю личных встреч (кто для кого "неудобный соперник").
-4.  🧠 Сделай вывод, исходя из мотивации (кому победа нужнее).
-
-ФОРМАТ ОТВЕТА:
-🏆 **Матч:** [Команды]
-📊 **Анализ:** [3-4 предложения про тактику и форму]
-💣 **Рискованная ставка:** [Высокий кэф] (Обоснование)
-✅ **Надежная ставка:** [Низкий кэф] (Обоснование)
-🔮 **Точный счет (предположение):** [Счет]
+ТЫ — ПРОФЕССИОНАЛЬНЫЙ СПОРТИВНЫЙ АНАЛИТИК.
+Твоя задача: Дать прогноз на матч.
+Формат:
+1. Анализ формы команд.
+2. Ставка (Риск / Надежная).
+3. Точный счет.
 """
 
+# --- ФУНКЦИИ БОТА ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 **Я AI-Каппер.** Я работаю 24/7.\n\n"
-        "Напиши мне название матча (например: `Реал - Барселона`) или скопируй новости о составах.\n"
-        "Я проанализирую данные и дам прогноз."
-    )
+    await update.message.reply_text("⚽ Привет! Я AI-Каппер. Напиши, какой матч разобрать.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     if not user_text: return
-
-    # Сообщение о том, что бот думает
-    status_msg = await update.message.reply_text("⏳ *Изучаю статистику матча...*", parse_mode='Markdown')
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
-
+    status = await update.message.reply_text("⏳ Анализирую матч...")
     try:
-        # Собираем запрос
-        full_query = f"{SYSTEM_PROMPT}\n\nЗАПРОС ПОЛЬЗОВАТЕЛЯ: {user_text}"
-        
-        response = model.generate_content(full_query)
-        
-        # Удаляем сообщение "Изучаю..." и пишем ответ
-        await status_msg.delete()
+        query = f"{SYSTEM_PROMPT}\n\nМатч: {user_text}"
+        response = model.generate_content(query)
+        await status.delete()
         await update.message.reply_text(response.text, parse_mode='Markdown')
-        
     except Exception as e:
-        await status_msg.edit_text(f"⚠️ Ошибка анализа: {e}")
+        await status.edit_text(f"Ошибка: {e}")
+
+# ==========================================
+# 👇 ВОТ ЭТА ЧАСТЬ - "ОБМАНКА" ДЛЯ RENDER 👇
+# ==========================================
+app_server = Flask(__name__)
+
+@app_server.route('/')
+def index():
+    return "Бот работает! (Это заглушка для Render)"
+
+def run_web_server():
+    # Render требует слушать порт, который он выдаст, или 10000
+    port = int(os.environ.get("PORT", 10000))
+    app_server.run(host="0.0.0.0", port=port)
+# ==========================================
+
 
 if __name__ == '__main__':
     if not TELEGRAM_TOKEN:
-        print("ОШИБКА: Токен Telegram не найден в переменных окружения!")
+        print("ОШИБКА: Нет токена!")
     else:
+        # 1. Запускаем "фальшивый сайт" в фоновом режиме
+        server_thread = threading.Thread(target=run_web_server)
+        server_thread.start()
+
+        # 2. Запускаем основного бота
         app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
         app.add_handler(CommandHandler('start', start))
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
         
-        print("Бот-Каппер запущен на сервере!")
+        print("Бот и веб-сервер запущены!")
         app.run_polling()
